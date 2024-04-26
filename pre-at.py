@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras.layers import Input, LSTM, Dense, Embedding, TimeDistributed, Attention, Concatenate
+from tensorflow.keras.layers import Input, LSTM, Dense, Embedding, TimeDistributed, Attention, Concatenate, Dropout
 from tensorflow.keras.models import Model
 import re
 import numpy as np
@@ -14,6 +14,7 @@ from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from tensorflow.keras.losses import SparseCategoricalCrossentropy
 from tensorflow.keras import optimizers
+from tensorflow.keras.optimizers import Adam
 
 
 
@@ -156,7 +157,7 @@ print("y_test shape:", y_test_padded.shape)
 
 
 
-def build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm_units, num_layers, device):
+def build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm_units, num_layers, dropout_rate, device):
     with tf.device(device):
         # Encoder
         encoder_input = Input(shape=(None,))
@@ -172,6 +173,7 @@ def build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm
         encoder_states = []
         for layer in encoder_lstm_layers:
             encoder_outputs, state_h, state_c = layer(encoder_outputs)
+            encoder_outputs = Dropout(dropout_rate)(encoder_outputs)
             encoder_states.append([state_h, state_c])
 
         # Decoder
@@ -187,6 +189,8 @@ def build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm
         decoder_outputs = decoder_embedding
         for i, layer in enumerate(decoder_lstm_layers):
             decoder_outputs, _, _ = layer(decoder_outputs, initial_state=encoder_states[i])
+            decoder_outputs = Dropout(dropout_rate)(decoder_outputs)
+
 
         decoder_dense = Dense(summary_vocab_size, activation='softmax')
         decoder_outputs = decoder_dense(decoder_outputs)
@@ -198,6 +202,8 @@ def build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm
 embedding_dim = 128
 lstm_units = 256
 num_layers = 2
+dropout_rate = 0.2
+learning_rate = 0.001
 
 
 loss_object = SparseCategoricalCrossentropy(from_logits=True, reduction='none')
@@ -215,11 +221,11 @@ def loss_function(real, pred):
 
 
 print(device)
-model = build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm_units, num_layers, device)
+model = build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm_units, num_layers, dropout_rate, device)
 # Compile the model
-adam = optimizers.Adam(clipnorm=1.0)
+optimizer = Adam(learning_rate=learning_rate)
 
-model.compile(optimizer="adam", loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+model.compile(optimizer=optimizer, loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 model.summary()
 
 # Train the model
