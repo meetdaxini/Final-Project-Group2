@@ -156,29 +156,48 @@ print("y_test shape:", y_test_padded.shape)
 
 
 
-def build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm_units, device):
- with tf.device(device):
-    # Encoder
-    encoder_input = Input(shape=(None,))
-    encoder_embedding = Embedding(text_vocab_size, embedding_dim)(encoder_input)
-    encoder_lstm = LSTM(lstm_units, return_state=True)
-    _, encoder_state_h, encoder_state_c = encoder_lstm(encoder_embedding)
+def build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm_units, num_layers, device):
+    with tf.device(device):
+        # Encoder
+        encoder_input = Input(shape=(None,))
+        encoder_embedding = Embedding(text_vocab_size, embedding_dim)(encoder_input)
 
-    # Decoder
-    decoder_input = Input(shape=(None,))
-    decoder_embedding = Embedding(summary_vocab_size, embedding_dim)(decoder_input)
-    decoder_lstm = LSTM(lstm_units, return_sequences=True, return_state=True)
-    decoder_outputs, _, _ = decoder_lstm(decoder_embedding, initial_state=[encoder_state_h, encoder_state_c])
-    decoder_dense = Dense(summary_vocab_size, activation='softmax')
-    decoder_outputs = decoder_dense(decoder_outputs)
+        # Encoder LSTM layers
+        encoder_lstm_layers = []
+        for _ in range(num_layers):
+            encoder_lstm = LSTM(lstm_units, return_sequences=True, return_state=True)
+            encoder_lstm_layers.append(encoder_lstm)
 
-    model = Model([encoder_input, decoder_input], decoder_outputs)
-    return model
+        encoder_outputs = encoder_embedding
+        encoder_states = []
+        for layer in encoder_lstm_layers:
+            encoder_outputs, state_h, state_c = layer(encoder_outputs)
+            encoder_states.append([state_h, state_c])
 
+        # Decoder
+        decoder_input = Input(shape=(None,))
+        decoder_embedding = Embedding(summary_vocab_size, embedding_dim)(decoder_input)
+
+        # Decoder LSTM layers
+        decoder_lstm_layers = []
+        for _ in range(num_layers):
+            decoder_lstm = LSTM(lstm_units, return_sequences=True, return_state=True)
+            decoder_lstm_layers.append(decoder_lstm)
+
+        decoder_outputs = decoder_embedding
+        for i, layer in enumerate(decoder_lstm_layers):
+            decoder_outputs, _, _ = layer(decoder_outputs, initial_state=encoder_states[i])
+
+        decoder_dense = Dense(summary_vocab_size, activation='softmax')
+        decoder_outputs = decoder_dense(decoder_outputs)
+
+        model = Model([encoder_input, decoder_input], decoder_outputs)
+        return model
 
 
 embedding_dim = 128
 lstm_units = 256
+num_layers = 2
 
 
 loss_object = SparseCategoricalCrossentropy(from_logits=True, reduction='none')
@@ -196,7 +215,7 @@ def loss_function(real, pred):
 
 
 print(device)
-model = build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm_units, device)
+model = build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm_units, num_layers, device)
 # Compile the model
 adam = optimizers.Adam(clipnorm=1.0)
 
