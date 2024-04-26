@@ -187,13 +187,21 @@ def build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm
             decoder_lstm_layers.append(decoder_lstm)
 
         decoder_outputs = decoder_embedding
+        attention_outputs = []
         for i, layer in enumerate(decoder_lstm_layers):
             decoder_outputs, _, _ = layer(decoder_outputs, initial_state=encoder_states[i])
             decoder_outputs = Dropout(dropout_rate)(decoder_outputs)
 
+            # Attention mechanism
+            attention = Attention()([decoder_outputs, encoder_outputs])
+            attention_output = Concatenate(axis=-1)([decoder_outputs, attention])
+            attention_outputs.append(attention_output)
+
 
         decoder_dense = Dense(summary_vocab_size, activation='softmax')
-        decoder_outputs = decoder_dense(decoder_outputs)
+        decoder_outputs = decoder_dense(Concatenate(axis=-1)(attention_outputs))
+        # decoder_outputs = [decoder_dense(att_out) for att_out in attention_outputs]  # Dense layer for each decoder output with attention
+
 
         model = Model([encoder_input, decoder_input], decoder_outputs)
         return model
