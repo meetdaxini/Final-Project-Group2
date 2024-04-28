@@ -97,6 +97,3 @@ trainer = Trainer(
 trainer.train()
 
 # %%
-# predictions = trainer.predict(tokenized_dataset_test)
-
-
