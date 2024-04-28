@@ -111,11 +111,11 @@ print("Text Vocabulary Size:", text_vocab_size)
 
 # Tokenize and pad sequences
 # text
-tokenizer = Tokenizer(num_words=text_vocab_size)
-tokenizer.fit_on_texts(train_data['text_tokens'])
+tokenizer_text = Tokenizer(num_words=text_vocab_size)
+tokenizer_text.fit_on_texts(train_data['text_tokens'])
 
-X_train_sequences = tokenizer.texts_to_sequences(train_data['text_tokens'])
-X_test_sequences = tokenizer.texts_to_sequences(test_data['text_tokens'])
+X_train_sequences = tokenizer_text.texts_to_sequences(train_data['text_tokens'])
+X_test_sequences = tokenizer_text.texts_to_sequences(test_data['text_tokens'])
 
 X_train_padded = pad_sequences(X_train_sequences, maxlen=5000, padding='post')
 X_test_padded = pad_sequences(X_test_sequences, maxlen=5000, padding='post')
@@ -138,11 +138,11 @@ print("Summary Vocabulary Size:", summary_vocab_size)
 
 
 # Tokenize and pad sequences
-tokenizer = Tokenizer(num_words=summary_vocab_size)
-tokenizer.fit_on_texts(train_data['summary_tokens'])
+tokenizer_summary = Tokenizer(num_words=summary_vocab_size)
+tokenizer_summary.fit_on_texts(train_data['summary_tokens'])
 
-y_train_sequences = tokenizer.texts_to_sequences(train_data['summary_tokens'])
-y_test_sequences = tokenizer.texts_to_sequences(test_data['summary_tokens'])
+y_train_sequences = tokenizer_summary.texts_to_sequences(train_data['summary_tokens'])
+y_test_sequences = tokenizer_summary.texts_to_sequences(test_data['summary_tokens'])
 
 y_train_padded = pad_sequences(y_train_sequences, maxlen=500, padding='post')
 y_test_padded = pad_sequences(y_test_sequences, maxlen=500, padding='post')
@@ -170,11 +170,12 @@ def build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm
             encoder_lstm_layers.append(encoder_lstm)
 
         encoder_outputs = encoder_embedding
-        encoder_states = []
+
         for layer in encoder_lstm_layers:
             encoder_outputs, state_h, state_c = layer(encoder_outputs)
             encoder_outputs = Dropout(dropout_rate)(encoder_outputs)
-            encoder_states.append([state_h, state_c])
+
+        encoder_states = [state_h, state_c]
 
         # Decoder
         decoder_input = Input(shape=(None,))
@@ -188,8 +189,8 @@ def build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm
 
         decoder_outputs = decoder_embedding
         attention_outputs = []
-        for i, layer in enumerate(decoder_lstm_layers):
-            decoder_outputs, _, _ = layer(decoder_outputs, initial_state=encoder_states[i])
+        for layer in decoder_lstm_layers:
+            decoder_outputs, _, _ = layer(decoder_outputs, initial_state= encoder_states)
             decoder_outputs = Dropout(dropout_rate)(decoder_outputs)
 
             # Attention mechanism
@@ -197,14 +198,16 @@ def build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm
             attention_output = Concatenate(axis=-1)([decoder_outputs, attention])
             attention_outputs.append(attention_output)
 
-
         decoder_dense = Dense(summary_vocab_size, activation='softmax')
         decoder_outputs = decoder_dense(Concatenate(axis=-1)(attention_outputs))
         # decoder_outputs = [decoder_dense(att_out) for att_out in attention_outputs]  # Dense layer for each decoder output with attention
 
+        encoder_model = Model(encoder_input, [encoder_outputs,state_h, state_c])
+
 
         model = Model([encoder_input, decoder_input], decoder_outputs)
-        return model
+
+        return model, encoder_model
 
 
 embedding_dim = 128
@@ -229,7 +232,7 @@ def loss_function(real, pred):
 
 
 print(device)
-model = build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm_units, num_layers, dropout_rate, device)
+model, encoder_model = build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm_units, num_layers, dropout_rate, device)
 # Compile the model
 optimizer = Adam(learning_rate=learning_rate)
 
@@ -238,5 +241,5 @@ model.summary()
 
 # Train the model
 
-history = model.fit([X_train_padded, y_train_padded[:, :-1]], y_train_padded[:, 1:],
-                    epochs=50, batch_size=16, validation_data=([X_test_padded, y_test_padded[:, :-1]], y_test_padded[:, 1:]))
+history = model.fit([X_train_padded, y_train_padded], y_train_padded,
+                    epochs=10, batch_size=16, validation_data=([X_test_padded, y_test_padded], y_test_padded))
