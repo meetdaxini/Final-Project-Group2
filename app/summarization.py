@@ -1,5 +1,7 @@
 import nltk
+import torch
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # generate chunks of text \ sentences <= 1024 tokens
 def nest_sentences(document):
@@ -23,14 +25,13 @@ def nest_sentences(document):
   return nested
 
 # generate summary on text with <= 1024 tokens
-def generate_summary(text, tokenizer, model, max_tokens, min_tokens, length_penalty=3, regenerate_summar=True):
+def generate_summary(text, tokenizer, model, max_tokens, min_tokens, length_penalty=3):
   nested_sentences = nest_sentences(text)
-  device = 'cuda'
   summaries = []
   for nested in nested_sentences:
     input_tokenized = tokenizer.encode(' '.join(nested), truncation=True, return_tensors='pt')
     input_tokenized = input_tokenized.to(device)
-    summary_ids = model.to(device).generate(input_tokenized,
+    summary_ids = model.generate(input_tokenized,
                                       length_penalty=length_penalty,
                                       min_length=min_tokens,
                                       max_length=max_tokens)
