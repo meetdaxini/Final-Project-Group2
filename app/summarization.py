@@ -1,5 +1,13 @@
 import nltk
+import streamlit as st
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
+
+@st.cache_resource
+def load_tokenizer_and_model(model_name):
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+    return tokenizer, model
 
 # generate chunks of text \ sentences <= 1024 tokens
 def nest_sentences(document):
