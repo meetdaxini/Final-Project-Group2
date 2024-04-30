@@ -6,7 +6,7 @@ import requests
 base_url = "https://newsapi.org/v2/everything"
 api_key = "6cbe9af59e314c74b353a23e9bc7c622"
 
-def search_news(query, use_cache=True):
+def search_news(query, use_cache=False):
     cache_path = 'news_response_cache.json'
     if use_cache and os.path.exists(cache_path):
         print("Using cached data")
