@@ -5,6 +5,7 @@ import newspaper
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import torch
 
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 cnn_model_name = "facebook/bart-large-cnn"
 xsum_model_name = "facebook/bart-large-xsum"
@@ -52,6 +53,7 @@ if input_option == "Search Query or URL(s)":
                 articles = [newspaper.article(url) for url in input_value]
                 st.write("---")
             if articles:
+                article_contents = []
                 for article in articles:
                     if article.top_image:
                         st.image(article.top_image, use_column_width=True)
@@ -73,6 +75,14 @@ if input_option == "Search Query or URL(s)":
                         summary = generate_summary(article.title + ' ' + article.text, cnn_tokenizer, cnn_model, 200, 50, length_penalty=3)
                     st.write(f"Summary: {summary}")
                     st.write("---")
+                    article_contents.append(article.title + ' ' + article.text)
+
+                if len(article_contents)>1:
+                    all_article_contents = " ||||| ".join(article_contents)                
+                    with st.spinner("Generating summary of all articles..."):
+                        all_articles_summary = generate_summary(all_article_contents, xsum_tokenizer, xsum_model, 200, 100, length_penalty=3)
+                    st.write("Summary of All Articles:")
+                    st.write(all_articles_summary)
             else:
                 st.error(f"No articles found with your search query: {user_input}. Please try a different search query.")
         except Exception as e:
