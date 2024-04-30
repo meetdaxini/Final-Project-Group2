@@ -1,13 +1,5 @@
 import nltk
-import streamlit as st
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
-
-@st.cache_resource
-def load_tokenizer_and_model(model_name):
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-    return tokenizer, model
 
 # generate chunks of text \ sentences <= 1024 tokens
 def nest_sentences(document):
@@ -38,7 +30,7 @@ def generate_summary(text, tokenizer, model, max_tokens, min_tokens, length_pena
   for nested in nested_sentences:
     input_tokenized = tokenizer.encode(' '.join(nested), truncation=True, return_tensors='pt')
     input_tokenized = input_tokenized.to(device)
-    summary_ids = model.to(device).generate(input_tokenized,
+    summary_ids = model.generate(input_tokenized,
                                       length_penalty=length_penalty,
                                       min_length=min_tokens,
                                       max_length=max_tokens)
