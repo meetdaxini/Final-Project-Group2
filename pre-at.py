@@ -117,8 +117,8 @@ tokenizer_text.fit_on_texts(train_data['text_tokens'])
 X_train_sequences = tokenizer_text.texts_to_sequences(train_data['text_tokens'])
 X_test_sequences = tokenizer_text.texts_to_sequences(test_data['text_tokens'])
 
-X_train_padded = pad_sequences(X_train_sequences, maxlen=5000, padding='post')
-X_test_padded = pad_sequences(X_test_sequences, maxlen=5000, padding='post')
+X_train_padded = pad_sequences(X_train_sequences, maxlen=1500, padding='post')
+X_test_padded = pad_sequences(X_test_sequences, maxlen=1500, padding='post')
 
 
 
@@ -144,8 +144,8 @@ tokenizer_summary.fit_on_texts(train_data['summary_tokens'])
 y_train_sequences = tokenizer_summary.texts_to_sequences(train_data['summary_tokens'])
 y_test_sequences = tokenizer_summary.texts_to_sequences(test_data['summary_tokens'])
 
-y_train_padded = pad_sequences(y_train_sequences, maxlen=500, padding='post')
-y_test_padded = pad_sequences(y_test_sequences, maxlen=500, padding='post')
+y_train_padded = pad_sequences(y_train_sequences, maxlen=200, padding='post')
+y_test_padded = pad_sequences(y_test_sequences, maxlen=200, padding='post')
 
 
 # Print shapes
@@ -163,76 +163,64 @@ def build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm
         encoder_input = Input(shape=(None,))
         encoder_embedding = Embedding(text_vocab_size, embedding_dim)(encoder_input)
 
-        # Encoder LSTM layers
-        encoder_lstm_layers = []
-        for _ in range(num_layers):
-            encoder_lstm = LSTM(lstm_units, return_sequences=True, return_state=True)
-            encoder_lstm_layers.append(encoder_lstm)
-
-        encoder_outputs = encoder_embedding
-
-        for layer in encoder_lstm_layers:
-            encoder_outputs, state_h, state_c = layer(encoder_outputs)
-            encoder_outputs = Dropout(dropout_rate)(encoder_outputs)
-
+        encoder_lstm = LSTM(lstm_units, return_sequences=True, return_state=True, dropout=dropout_rate)
+        encoder_outputs, state_h, state_c = encoder_lstm(encoder_embedding)
         encoder_states = [state_h, state_c]
 
         # Decoder
         decoder_input = Input(shape=(None,))
         decoder_embedding = Embedding(summary_vocab_size, embedding_dim)(decoder_input)
 
-        # Decoder LSTM layers
-        decoder_lstm_layers = []
-        for _ in range(num_layers):
-            decoder_lstm = LSTM(lstm_units, return_sequences=True, return_state=True)
-            decoder_lstm_layers.append(decoder_lstm)
+        decoder_lstm = LSTM(lstm_units, return_sequences=True, return_state=True, dropout=dropout_rate)
+        decoder_outputs, _, _ = decoder_lstm(decoder_embedding, initial_state=encoder_states)
 
-        decoder_outputs = decoder_embedding
-        attention_outputs = []
-        for layer in decoder_lstm_layers:
-            decoder_outputs, _, _ = layer(decoder_outputs, initial_state= encoder_states)
-            decoder_outputs = Dropout(dropout_rate)(decoder_outputs)
+        # Attention mechanism
+        attention = Attention()
+        attention_output = attention([decoder_outputs, encoder_outputs])
+        concat_output = Concatenate(axis=-1)([decoder_outputs, attention_output])
 
-            # Attention mechanism
-            attention = Attention()([decoder_outputs, encoder_outputs])
-            attention_output = Concatenate(axis=-1)([decoder_outputs, attention])
-            attention_outputs.append(attention_output)
-
+        # Decoder Dense layer
         decoder_dense = Dense(summary_vocab_size, activation='softmax')
-        decoder_outputs = decoder_dense(Concatenate(axis=-1)(attention_outputs))
-        # decoder_outputs = [decoder_dense(att_out) for att_out in attention_outputs]  # Dense layer for each decoder output with attention
+        decoder_final_output = decoder_dense(concat_output)
 
-        encoder_model = Model(encoder_input, [encoder_outputs,state_h, state_c])
+        # Full model for training
+        model = Model([encoder_input, decoder_input], decoder_final_output)
+
+        # Define the encoder model
+        encoder_model = Model(encoder_input, [encoder_outputs,encoder_states])
+
+        # Inputs for inference
+        decoder_state_input_h = Input(shape=(lstm_units,))
+        decoder_state_input_c = Input(shape=(lstm_units,))
+        decoder_states_inputs = [decoder_state_input_h, decoder_state_input_c]
+
+        decoder_embedding2 = Embedding(summary_vocab_size, embedding_dim)(decoder_input)
+        # Using the same LSTM layer as in training
+        inf_decoder_outputs, inf_state_h, inf_state_c = decoder_lstm(decoder_embedding2, initial_state=decoder_states_inputs)
+        inf_attention_output = attention([inf_decoder_outputs, encoder_outputs])
+        inf_concat_output = Concatenate(axis=-1)([inf_decoder_outputs, inf_attention_output])
+        inf_decoder_final_output = decoder_dense(inf_concat_output)
+
+        # Construct the inference decoder model
+        decoder_model = Model(
+            [decoder_input] + [encoder_outputs,decoder_states_inputs],
+            [inf_decoder_final_output, inf_state_h, inf_state_c]
+        )
+
+        return model, encoder_model, decoder_model
 
 
-        model = Model([encoder_input, decoder_input], decoder_outputs)
-
-        return model, encoder_model
-
-
-embedding_dim = 128
-lstm_units = 256
+embedding_dim = 256
+lstm_units = 128
 num_layers = 2
-dropout_rate = 0.2
+dropout_rate = 0.5
 learning_rate = 0.001
 
 
-loss_object = SparseCategoricalCrossentropy(from_logits=True, reduction='none')
-
-def loss_function(real, pred):
-    mask = tf.math.logical_not(tf.math.equal(real, 0))
-    loss_ = loss_object(real, pred)
-
-    mask = tf.cast(mask, dtype=loss_.dtype)
-    loss_ *= mask
-
-    return tf.reduce_mean(loss_)
-
-# train_accuracy = SparseCategoricalAccuracy()
-
-
 print(device)
-model, encoder_model = build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm_units, num_layers, dropout_rate, device)
+model, encoder_model, decoder_model = build_seq2seq_model(text_vocab_size, summary_vocab_size, embedding_dim, lstm_units, num_layers, dropout_rate, device)
+
+
 # Compile the model
 optimizer = Adam(learning_rate=learning_rate)
 
@@ -242,4 +230,65 @@ model.summary()
 # Train the model
 
 history = model.fit([X_train_padded, y_train_padded], y_train_padded,
-                    epochs=10, batch_size=16, validation_data=([X_test_padded, y_test_padded], y_test_padded))
+                    epochs=5, batch_size=16, validation_data=([X_test_padded, y_test_padded], y_test_padded))
+
+
+reverse_target_word_index = tokenizer_summary.index_word
+reverse_source_word_index = tokenizer_text.index_word
+target_word_index = tokenizer_summary.word_index
+
+
+def decode_sequence(input_seq):
+    # Encode the input as state vectors.
+    e_out, [e_h, e_c] = encoder_model.predict(input_seq)
+
+    # Generate empty target sequence of length 1.
+    target_seq = np.zeros((1, 1))
+
+    stop_condition = False
+    decoded_sentence = ''
+    max_summary_length = 200  # Maximum length for summary
+    while not stop_condition:
+
+        output_tokens, h, c = decoder_model.predict([target_seq] + [e_out, e_h, e_c])
+
+        # Sample a token
+        sampled_token_index = np.argmax(output_tokens[0, -1, :])
+
+        if sampled_token_index == 0:
+            sampled_token = 'UNK'  # Handle unknown token
+        else:
+            sampled_token = reverse_target_word_index.get(sampled_token_index, 'UNK')
+
+        decoded_sentence += ' ' + sampled_token
+
+        # Exit condition: either hit max length or find stop word.
+        if len(decoded_sentence.split()) >= (max_summary_length - 1):
+            stop_condition = True
+
+        # Update the target sequence (of length 1).
+        target_seq = np.zeros((1, 1))
+        target_seq[0, 0] = sampled_token_index
+
+        # Update internal states
+        e_h, e_c = h, c
+
+    return decoded_sentence
+
+
+# Convert indices back to text
+def indices_to_text(indices, tokenizer):
+    return tokenizer.sequences_to_texts(indices)
+
+
+# Print actual and predicted text for the first 5 samples
+for i in range(5):
+    input_text = indices_to_text([X_test_padded[i]], tokenizer_text)[0]
+    actual_summary = indices_to_text([y_test_padded[i]], tokenizer_summary)[0]
+
+    print(f"Sample {i + 1}:")
+    print("Input Text:", input_text)
+    print("Actual Summary:", actual_summary)
+    print("Predicted summary:", decode_sequence(X_test_padded[i].reshape(1,1500)))
+    print()
+
