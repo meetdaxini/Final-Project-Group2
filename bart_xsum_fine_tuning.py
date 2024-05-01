@@ -2,19 +2,17 @@
 import transformers
 from datasets import load_dataset, load_metric
 import numpy as np
-from datasets import load_dataset, concatenate_datasets, DatasetDict
-import torch
-
+from datasets import load_dataset, Dataset, DatasetDict
+import pandas as pd
 # %%
 cnn_dailymail_dataset = load_dataset("cnn_dailymail", "3.0.0")
-multi_news_dataset = load_dataset("multi_news")
 metric = load_metric('rouge')
 model_name = 'facebook/bart-large-xsum'
 
 # %%
-max_input = 512
-max_target = 128
-tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, low_cpu_mem_usage=True, torch_dtype=torch.float16)
+max_input = 1024
+max_target = 200
+tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
 
 # %%
 def tokenize_function(data_to_process):
@@ -38,53 +36,106 @@ def tokenize_function(data_to_process):
 # %%
 # %%
 cnn_dailymail_dataset = load_dataset("cnn_dailymail", "3.0.0")
-multi_news_dataset = load_dataset("multi_news")
 cnn_daily_mail = cnn_dailymail_dataset.map(lambda example: {'article': example['article'], 'summary': example['highlights']}, remove_columns=['highlights', 'id'])
-multi_news = multi_news_dataset.map(lambda example: {'article': example['document'], 'summary': example['summary']}, remove_columns=['document'])
+
+
+cnn_df_train = pd.DataFrame(cnn_daily_mail['train'])
+cnn_df_validation = pd.DataFrame(cnn_daily_mail['validation'])
+cnn_df_test = pd.DataFrame(cnn_daily_mail['test'])
+
+cnn_df_train = cnn_df_train.drop_duplicates(subset=['summary'])
+cnn_df_validation = cnn_df_validation.drop_duplicates(subset=['summary'])
+cnn_df_test = cnn_df_test.drop_duplicates(subset=['summary'])
+
+cnn_df_train = cnn_df_train.drop_duplicates(subset=['article'])
+cnn_df_validation = cnn_df_validation.drop_duplicates(subset=['article'])
+cnn_df_test = cnn_df_test.drop_duplicates(subset=['article'])
+
+
+def calculate_avg_tokens(dataset):
+
+    # Calculate the word count for articles and summaries
+    dataset['article_word_count'] = dataset['article'].apply(lambda x: len(x.split()))
+    dataset['summary_word_count'] = dataset['summary'].apply(lambda x: len(x.split()))
+
+    # Calculate average tokens
+    avg_tokens_article = dataset['article_word_count'].mean()
+    avg_tokens_summary = dataset['summary_word_count'].mean()
+
+    return print("Average tokens in articles:", avg_tokens_article), print("Average tokens in summaries:", avg_tokens_summary)
+
+
+# Calculate the word count for articles
+def filter_by_word_count(dataset, column, max_word_count):
+
+    # Calculate the word count for the specified column
+    dataset['word_count'] = dataset[column].apply(lambda x: len(x.split()))
+
+    # Create a new DataFrame removing rows with word count exceeding the maximum
+    filtered_df = dataset[dataset['word_count'] <= max_word_count].copy()
+
+    # Drop the temporary column used for word count
+    filtered_df.drop(columns=['word_count'], inplace=True)
+
+    return filtered_df
+
+
+
+#%%
+# cnn news
+cnn_df_train = filter_by_word_count(cnn_df_train, 'article', 5000)
+print("Shape of the cnn_df_train filtered dataset:", cnn_df_train.shape)
+
+cnn_df_validation = filter_by_word_count(cnn_df_validation, 'article', 5000)
+print("Shape of the cnn_df_validation filtered dataset:", cnn_df_validation.shape)
+
+cnn_df_test = filter_by_word_count(cnn_df_test, 'article', 5000)
+print("Shape of the cnn_df_test filtered dataset:", cnn_df_test.shape)
+
+#%%
+def remove_empty_rows(dataset):
+    # Filter out rows with empty articles or summaries
+    dataset = dataset[(dataset['article'] != '') & (dataset['summary'] != '')]
+    return dataset
+
+
+cnn_df_train = remove_empty_rows(cnn_df_train).reset_index()
+cnn_df_validation = remove_empty_rows(cnn_df_validation).reset_index()
+cnn_df_test = remove_empty_rows(cnn_df_test).reset_index()
+
 
 # %%
-def concatenate_splits(dataset1, dataset2):
-    return DatasetDict({
-        split: concatenate_datasets([dataset1[split], dataset2[split]])
-        for split in dataset1.keys()
-    })
-
-# %%
-combined_dataset = concatenate_splits(cnn_daily_mail, multi_news)
+print("\nSummary Statistics for cnn_df_train Training Dataset:")
+print(cnn_df_train.describe())
 
 
-# %%
-combined_dataset["train"] = combined_dataset["train"].shuffle(seed=42)
-combined_dataset["test"] = combined_dataset["test"].shuffle(seed=42)
-combined_dataset["validation"] = combined_dataset["validation"].shuffle(seed=42)
-# Print some information about the combined dataset
-for split in combined_dataset.keys():
-    print(f"Size of {split} split:", len(combined_dataset[split]))
-    print(f"Example from {split} split:", combined_dataset[split][0])
 
-tokenized_dataset = combined_dataset.map(tokenize_function, batched=True)
+#%%
+print("cnn_df_train")
+calculate_avg_tokens(cnn_df_train)
 
-# %% [markdown]
-# ## If memory problems
-# 
-# - sample data to smaller sizes
+#%%
 
-# %%
-#sample the data
-train_sample = tokenized_dataset['train'].shuffle(seed=42).select(range(30000))
-validation_sample = tokenized_dataset['validation'].shuffle(seed=42).select(range(6000))
-test_sample = tokenized_dataset['test'].shuffle(seed=42).select(range(6000))
+print("\nSummary Statistics for cnn_df_train Training Dataset:")
+print(cnn_df_train.describe())
+#%%
+train_dataset = Dataset.from_pandas(cnn_df_train)
+validation_dataset = Dataset.from_pandas(cnn_df_validation)
+test_dataset = Dataset.from_pandas(cnn_df_test)
 
-# %%
-tokenized_dataset['train'] = train_sample
-tokenized_dataset['validation'] = validation_sample
-tokenized_dataset['test'] = test_sample
+cnn_final_dataset = DatasetDict({
+    'train': train_dataset,
+    'validation': validation_dataset,
+    'test': test_dataset
+})
 
-# %%
-tokenized_dataset
 
-# %% [markdown]
-# ## Training process
+#%%
+cnn_final_dataset
+
+#%%
+tokenized_dataset = cnn_final_dataset.map(tokenize_function, batched=True)
+
 
 # %%
 #load model
@@ -94,7 +145,7 @@ model = transformers.AutoModelForSeq2SeqLM.from_pretrained(model_name)
 # Depending on computing power, batch size can go as low as 1 if necessary
 
 # %%
-batch_size = 12
+batch_size = 8
 
 # %%
 collator = transformers.DataCollatorForSeq2Seq(tokenizer, model=model)
@@ -119,11 +170,11 @@ def compute_rouge(pred):
 
 # %%
 args = transformers.Seq2SeqTrainingArguments(
-    'summary-combined',
+    'bart-large-xsum-cnn_daily_mail_plus_final',
     evaluation_strategy='epoch',
     learning_rate=2e-5,
     per_device_train_batch_size=batch_size,
-    per_device_eval_batch_size= batch_size,
+    per_device_eval_batch_size=batch_size,
     gradient_accumulation_steps=20,
     weight_decay=0.01,
     save_total_limit=2,
@@ -146,99 +197,12 @@ trainer = transformers.Seq2SeqTrainer(
 
 # %%
 trainer.train()
-
-# Testing the fine tuned model
-
-# %%
-article = """
-LOS ANGELES (AP) — In her first interview since the NBA banned her estranged husband, Shelly Sterling says she will fight to keep her share of the Los Angeles Clippers and plans one day to divorce Donald Sterling. 
- 
- (Click Prev or Next to continue viewing images.) 
- 
- ADVERTISEMENT (Click Prev or Next to continue viewing images.) 
- 
- Los Angeles Clippers co-owner Shelly Sterling, below, watches the Clippers play the Oklahoma City Thunder along with her attorney, Pierce O'Donnell, in the first half of Game 3 of the Western Conference... (Associated Press) 
- 
- Shelly Sterling spoke to Barbara Walters, and ABC News posted a short story with excerpts from the conversation Sunday. 
- 
- NBA Commissioner Adam Silver has banned Donald Sterling for making racist comments and urged owners to force Sterling to sell the team. Silver added that no decisions had been made about the rest of Sterling's family. 
- 
- According to ABC's story, Shelly Sterling told Walters: "I will fight that decision." 
- 
- Sterling also said that she "eventually" will divorce her husband, and that she hadn't yet done so due to financial considerations. ||||| Shelly Sterling said today that "eventually, I am going to" divorce her estranged husband, Donald Sterling, and if the NBA tries to force her to sell her half of the Los Angeles Clippers, she would "absolutely" fight to keep her stake in the team. 
- 
- "I will fight that decision," she told ABC News' Barbara Walters today in an exclusive interview. "To be honest with you, I'm wondering if a wife of one of the owners, and there's 30 owners, did something like that, said those racial slurs, would they oust the husband? Or would they leave the husband in?" 
- 
- Sterling added that the Clippers franchise is her "passion" and "legacy to my family." 
- 
- "I've been with the team for 33 years, through the good times and the bad times," she added. 
- 
- These comments come nearly two weeks after NBA Commissioner Adam Silver announced a lifetime ban and a $2.5 million fine for Donald Sterling on April 29, following racist comments from the 80-year-old, which were caught on tape and released to the media. 
- 
- Read: Barbara Walters' Exclusive Interview With V. Stiviano 
- 
- Being estranged from her husband, Shelly Sterling said she would "have to accept" whatever punishment the NBA handed down to him, but that her stake in the team should be separate. 
- 
- "I was shocked by what he said. And -- well, I guess whatever their decision is -- we have to live with it," she said. "But I don't know why I should be punished for what his actions were." 
- 
- An NBA spokesman said this evening that league rules would not allow her tol hold on to her share. 
- 
- "Under the NBA Constitution, if a controlling owner's interest is terminated by a 3/4 vote, all other team owners' interests are automatically terminated as well," NBA spokesman Mike Bass said. "It doesn't matter whether the owners are related as is the case here. These are the rules to which all NBA owners agreed to as a condition of owning their team." 
- 
- Sherry Sterling's lawyer, Pierce O'Donnell, disputed the league's reading of its constitution. 
- 
- "We do not agree with the league's self-serving interpretation of its constitution, its application to Shelly Sterling or its validity under these unique circumstances," O'Donnell said in a statement released this evening in reposnse the NBA. "We live in a nation of laws. California law and the United States Constitution trump any such interpretation." 
- 
- If the league decides to force Donald Sterling to sell his half of the team, Shelly Sterling doesn't know what he will do, but the possibility of him transferring full ownership to her is something she "would love him to" consider. 
- 
- Related: NBA Bans Clippers Owner Donald Sterling For Life 
- 
- "I haven't discussed it with him or talked to him about it," she said. 
- 
- The lack of communication between Rochelle and Donald Sterling led Walters to question whether she plans to file for divorce. 
- 
- "For the last 20 years, I've been seeing attorneys for a divorce," she said, laughing. "In fact, I have here-- I just filed-- I was going to file the petition. I signed the petition for a divorce. And it came to almost being filed. And then, my financial advisor and my attorney said to me, 'Not now.'" 
- 
- Sterling added that she thinks the stalling of the divorce stems from "financial arrangements." 
- 
- But she said "Eventually, I'm going to." 
- 
- She also told Walters she thinks her estranged husband is suffering from "the onset of dementia." 
- 
- Since Donald Sterling's ban, several celebrities have said they would be willing to buy the team from Sterling, including Oprah Winfrey and Magic Johnson. Sterling remains the owner, though his ban means he can have nothing to do with running the team and can't attend any games. 
- 
- Silver announced Friday that former Citigroup chairman and former Time Warner chairman Richard Parsons has been named interim CEO of the team, but nothing concrete in terms of ownership or whether Sterling will be forced to sell the team. Parsons will now take over the basic daily operations for the team and oversee the team's president. 
- 
- Read: What You Need to Know This Week About Donald Sterling 
- 
- ABC News contacted Donald Sterling for comment on his wife's interview, but he declined.
-"""
-
-# %%
-model_inputs = tokenizer(article,  max_length=max_input, padding='max_length', truncation=True)
-
-# %%
-model_inputs
-
-# %%
-raw_pred, _, _ = trainer.predict([model_inputs])
-
-# %%
-raw_pred
-
-# %%
-tokenizer.decode(raw_pred[0])
-
-# %%
-tokenizer.decode(raw_pred[0])
-
 # %%
 # Test the model
 test_results = trainer.evaluate(tokenized_dataset['test'])
 print("Test results:", test_results)
 
 # %%
-model_output_dir = 'summary-combined/final_model'
+model_output_dir = 'bart-large-xsum-cnn_daily_final'
 trainer.save_model(model_output_dir)
-
 
