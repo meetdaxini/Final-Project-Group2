@@ -7,7 +7,7 @@ import torch
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-cnn_model_name = "facebook/bart-large-cnn"
+cnn_model_name = "bart-large-xsum-cnn_daily_final"
 xsum_model_name = "facebook/bart-large-xsum"
 
 
