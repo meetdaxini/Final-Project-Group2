@@ -4,6 +4,18 @@ from datasets import load_dataset, load_metric
 import numpy as np
 from datasets import load_dataset, Dataset, DatasetDict
 import pandas as pd
+import json
+import os
+
+output_dir = 'training_logs'
+os.makedirs(output_dir, exist_ok=True)
+
+class SaveResultsCallback(transformers.TrainerCallback):
+    def on_evaluate(self, args, state, control, metrics, **kwargs):
+        epoch = state.epoch
+        output_file = os.path.join(output_dir, f'results_epoch_{epoch}.json')
+        with open(output_file, 'w') as f:
+            json.dump(metrics, f, indent=4)
 # %%
 cnn_dailymail_dataset = load_dataset("cnn_dailymail", "3.0.0")
 metric = load_metric('rouge')
@@ -181,8 +193,9 @@ args = transformers.Seq2SeqTrainingArguments(
     num_train_epochs=3,
     predict_with_generate=True,
     eval_accumulation_steps=1,
-    fp16=True
-    )
+    fp16=True,
+    save_strategy='epoch',
+)
 
 # %%
 trainer = transformers.Seq2SeqTrainer(
@@ -192,7 +205,8 @@ trainer = transformers.Seq2SeqTrainer(
     eval_dataset=tokenized_dataset['validation'],
     data_collator=collator,
     tokenizer=tokenizer,
-    compute_metrics=compute_rouge
+    compute_metrics=compute_rouge,
+    callbacks=[SaveResultsCallback()]
 )
 
 # %%
