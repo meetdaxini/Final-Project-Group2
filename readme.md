@@ -11,7 +11,7 @@ This project uses state-of-the-art NLP techniques for news summarization. Additi
 To get started, you need to install the required dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
 ## Streamlit App
