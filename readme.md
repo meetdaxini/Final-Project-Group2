@@ -29,6 +29,7 @@ cd Code/app
 ```bash
 wget https://storage.googleapis.com/nlp-grp-2-bucket/best_model_Multi_News_final.pt
 wget https://storage.googleapis.com/nlp-grp-2-bucket/bart-large-xsum-cnn_daily_final.zip
+unzip bart-large-xsum-cnn_daily_final.zip
 ```
 
 3. Update the News API key in `Code/app/utils.py` on line 7.
